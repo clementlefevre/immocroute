@@ -1,0 +1,150 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+#load lib
+```{r}
+library(stringr)
+library(dplyr)
+library(rgdal)
+library(tidyr)
+library(leaflet)
+library(RColorBrewer)
+library(ggplot2)
+library(plotly)
+
+```
+
+```{r}
+
+create.zipcode.insee_arr.file <- function(){
+
+inseeCode_zipcode <- read.csv('data/laposte_hexasmal.csv',sep=';') 
+inseeCode_zipcode <- inseeCode_zipcode %>% select(Code_commune_INSEE,Nom_commune, Code_postal ) 
+inseeCode_zipcode$Code_postal<- as.factor(inseeCode_zipcode$Code_postal)
+#inseeCode_zipcode <- inseeCode_zipcode %>% group_by( Code_postal) %>% slice(1)
+inseeCode_zipcode$Code_commune_INSEE<- str_pad(inseeCode_zipcode$Code_commune_INSEE, 5, pad = "0")
+
+france.communes <- readOGR("bretagne_shp/ADMIN-EXPRESS_2-0__SHP__FRA_2019-03-14/ADMIN-EXPRESS/1_DONNEES_LIVRAISON_2019-03-14/ADE_2-0_SHP_LAMB93_FR/COMMUNE.shp",
+                  layer = "COMMUNE", GDAL1_integer64_policy = TRUE)
+
+df.communes<- france.communes@data
+df.communes$INSEE_COM<- str_pad(df.communes$INSEE_COM, 5, pad = "0")
+df.communes$ARR_DEP <- str_c(df.communes$INSEE_DEP,'_',df.communes$INSEE_ARR)
+  
+zipcode.insee <- merge(inseeCode_zipcode,df.communes,by.x='Code_commune_INSEE',by.y='INSEE_COM',all.x=TRUE) %>% drop_na(ID)%>% group_by( Code_postal) %>% slice(1)
+
+zipcode.insee<- zipcode.insee %>% select(Code_postal,INSEE_DEP,INSEE_ARR,ARR_DEP)
+
+write.csv(zipcode.insee,"zipcode_insee_dep_arr.csv")
+  
+}
+
+create.pop.density.dep_arr <- function(){
+  
+  france.communes <- readOGR("bretagne_shp/ADMIN-EXPRESS_2-0__SHP__FRA_2019-03-14/ADMIN-EXPRESS/1_DONNEES_LIVRAISON_2019-03-14/ADE_2-0_SHP_LAMB93_FR/COMMUNE.shp",
+                  layer = "COMMUNE", GDAL1_integer64_policy = TRUE)
+
+df.communes<- france.communes@data
+
+df.communes$INSEE_COM<- str_pad(df.communes$INSEE_COM, 5, pad = "0")
+df.communes$ARR_DEP <- str_c(df.communes$INSEE_DEP,'_',df.communes$INSEE_ARR)
+  
+df.pop.density.arr_dep <- df.communes %>% group_by(ARR_DEP)%>% summarise(population=sum(POPULATION))
+
+write.csv(df.pop.density.arr_dep,'pop_density_arr_dep.csv',row.names=FALSE)
+}
+
+
+
+```
+
+
+
+```{r}
+
+
+aggregate.per.insee_arr<- function (filename){
+  
+
+filename <- paste0("data/leboncoin/",filename)
+print(filename)
+
+data.boncoin <- read.csv(filename)
+data.boncoin$zipcode<- str_pad(data.boncoin$zipcode, 5, pad = "0")
+data.boncoin <- data.boncoin %>% group_by(zipcode)%>% summarise(offers = n())
+
+df.zipcode_dep_arr <- read.csv('zipcode_insee_dep_arr.csv')
+df.zipcode_dep_arr$Code_postal<- str_pad(df.zipcode_dep_arr$Code_postal, 5, pad = "0")
+
+data.boncoin.dep_arr <- merge(data.boncoin,df.zipcode_dep_arr,by.x='zipcode',by.y='Code_postal')
+data.boncoin.dep_arr <- data.boncoin.dep_arr %>% group_by(ARR_DEP) %>% summarise(offers = sum(offers))
+
+pop.density.arr_dep <- read.csv('pop_density_arr_dep.csv')
+
+data.boncoin.dep_arr<- merge(data.boncoin.dep_arr,pop.density.arr_dep,by='ARR_DEP')
+
+data.boncoin.dep_arr$offers_per_th_hab <- data.boncoin.dep_arr$offers/data.boncoin.dep_arr$population*1000
+
+france.arr <- readOGR("bretagne_shp/ADMIN-EXPRESS_2-0__SHP__FRA_2019-03-14/ADMIN-EXPRESS/1_DONNEES_LIVRAISON_2019-03-14/ADE_2-0_SHP_LAMB93_FR/ARRONDISSEMENT_DEPARTEMENTAL.shp",
+                  layer = "ARRONDISSEMENT_DEPARTEMENTAL", GDAL1_integer64_policy = TRUE)
+
+france.arr@data$INSEE_DEP <-  str_pad(as.character(france.arr@data$INSEE_DEP), 2, pad = "0")
+france.arr$ARR_DEP <- str_c(france.arr@data$INSEE_DEP,'_',france.arr@data$INSEE_ARR)
+df.arr <- france.arr@data
+
+france.arr <- merge(france.arr,data.boncoin.dep_arr,by='ARR_DEP')
+
+return(france.arr)
+  
+}
+
+
+```
+
+
+# plot map
+```{r}
+
+france.arr <- aggregate.per.insee_arr("leboncoin_duster_locations.csv")
+df.votes <- read.csv('data/elections/european_elections_2019_insee_arrondissements.csv')
+df.lepen <- df.votes %>% filter(value.1=="BARDELLA Jordan")
+
+data.boncoin <- france.arr@data
+
+data.boncoin <-merge(data.boncoin,df.lepen,by="ARR_DEP")
+
+fit <- lm(data=data.boncoin %>% filter(INSEE_REG==75),votes.percent~log(offers_per_th_hab))
+summary(fit)
+
+ggplotly(ggplot(data.boncoin,aes(votes.percent,log(offers_per_th_hab),color=INSEE_REG))+ geom_point())
+
+
+
+```
+
+```{r}
+pal <- colorQuantile("Greens",france.arr@data$offers_per_th_hab, n = 5)
+
+france.arr <- spTransform(france.arr, CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+
+leaflet(france.arr)    %>% addProviderTiles(providers$OpenStreetMap.HOT) %>% addPolygons(
+  color = "#444444",
+  weight = .2,
+  smoothFactor = 0.5,
+  layerId = france.arr$ID,
+  #opacity = 1.0,
+  fillOpacity = 0.6,
+ 
+  fillColor = ~ pal(france.arr@data$offers_per_th_hab),
+  highlightOptions = highlightOptions(
+    color = "white",
+    weight = 2,
+    bringToFront = TRUE
+  )
+)
+```
+
+
+

@@ -1,0 +1,97 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(stringr)
+library(dplyr)
+library(rgdal)
+library(tidyr)
+```
+
+
+## load europeennes elections
+```{r}
+df<- read.csv('data/elections/resultats-definitifs-par-commune.csv',header = T,sep=';')
+```
+
+
+# party labels
+```{r}
+get.party.label<- function(df){
+  cols <- colnames(df)
+#party.index <- c(1,4,14,18,22,28) %>% paste0('\\.',.,'$')
+#party.filter.index <- paste(party.index,collapse="|")
+
+values<- head(df,1) %>% t() %>% as.data.frame()
+values$names <- rownames(values)
+colnames(values)<- c('value','col.name')
+rownames(values) <- NULL
+#values <- values %>%  filter(grepl(party.filter.index, col.name))
+values <- values %>% filter(grepl("^Nom|Etendu|^Voix", col.name)) 
+party.name <- values %>% slice(which((row_number()) %% 3 == 1)) %>% select(value)
+leader <- values %>% slice(which((row_number()) %% 3 == 1)+1) %>% select(value)
+votes <- values %>% slice(which((row_number()) %% 3 == 1)+2) %>% select(col.name)
+party.name <- cbind(party.name,leader,votes)
+return(party.name)
+}
+
+
+party.names<- get.party.label(df)
+
+```
+
+
+## select data
+```{r}
+sample <- df %>% filter(Code.du.département==41,Code.de.la.commune==269)%>% t()
+cols <- colnames(df)
+
+voix.cols <- cols[grepl('^Voix',cols)]
+
+df.light <- df %>% select(Code.du.département,Code.de.la.commune, Exprimés,voix.cols)
+df.light$Code.du.département <- str_pad(df.light$Code.du.département,2,pad="0")
+df.light$Code.de.la.commune <- str_pad(df.light$Code.de.la.commune,3,pad="0")
+
+df.light$insee.com <- str_c(df.light$Code.du.département,df.light$Code.de.la.commune)
+
+df.light <- df.light %>% select(insee.com,everything())
+
+df.light.gato <- df.light %>% gather("voix","value",-insee.com,-Exprimés,-Code.du.département,-Code.de.la.commune)
+
+df.light.gato$percent <- df.light.gato$value*100/df.light.gato$Exprimés 
+
+df.insee.com.bretagne <- df.light.gato %>% filter(Code.du.département %in% c(56,35,22,29))
+
+df.insee.com.bretagne <- merge(df.insee.com.bretagne%>% select(insee.com,voix,percent), party.names,by.x='voix',by.y='col.name') %>% select(-voix)
+
+write.csv(df.insee.com.bretagne ,'data/european_elections_2019_inseecom_bretagne.csv')
+
+```
+## add ARR code
+```{r}
+france.communes <- readOGR("bretagne_shp/ADMIN-EXPRESS_2-0__SHP__FRA_2019-03-14/ADMIN-EXPRESS/1_DONNEES_LIVRAISON_2019-03-14/ADE_2-0_SHP_LAMB93_FR/COMMUNE.shp",
+                  layer = "COMMUNE", GDAL1_integer64_policy = TRUE)
+
+df.communes<- france.communes@data
+df.communes$INSEE_COM<- str_pad(df.communes$INSEE_COM, 5, pad = "0")
+df.communes$ARR_DEP <- str_c(df.communes$INSEE_DEP,'_',df.communes$INSEE_ARR) 
+df.communes <- df.communes %>% select(INSEE_COM,INSEE_ARR, ARR_DEP)
+
+df.light.gato.arr <- merge(df.light.gato,df.communes,by.x="insee.com",by.y='INSEE_COM')
+```
+
+
+# aggregate votes per Insee ARR
+```{r}
+groupy <- df.light.gato.arr %>% group_by(ARR_DEP,voix) %>% summarise(votes.percent = sum(value)*100/sum(Exprimés))
+
+groupy <- merge(groupy,party.names,by.x='voix',by.y='col.name') %>% select(-voix)
+
+write.csv(groupy,'data/elections/european_elections_2019_insee_arrondissements.csv',row.names = FALSE)
+
+#check
+groupy %>% group_by(ARR_DEP)%>% summarise(total=sum(votes.percent)) %>% arrange(desc(total))
+```
+

@@ -1,0 +1,50 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(plotly)
+library(purrr)
+library(readr)
+
+```
+
+
+load data
+```{r}
+df1<- read.csv('data/detailed_dept_22.csv',stringsAsFactors = F)
+df2<- read.csv('data/detailed_dept_29.csv',stringsAsFactors = F)
+df3<-read.csv('data/detailed_dept_56.csv',stringsAsFactors = F)
+df4<-read.csv('data/detailed_dept_35.csv',stringsAsFactors = F)
+df <- dplyr::bind_rows(df1,df2,df3,df4)
+df$prix_m2<- df$prix/df$surfaceHabitable
+df$age <- Sys.Date()-as.Date(df$dateCreation)
+
+```
+
+
+```{r}
+all.detailed.files <- fs::dir_ls('data/', regexp = "(detailed).*\\.csv$")
+df <- all.detailed.files %>% map_dfr(read_csv)
+df$prix_m2<- df$prix/df$surface
+df$age <- Sys.Date()-as.Date(df$dateCreation)
+
+```
+
+```{r}
+p <- ggplot(df %>% filter(prix_m2<20000),aes(age,prix_m2,color=departementNom)) + geom_point()
+ggplotly(p)
+```
+# aggregate pro town
+```{r}
+groupy <- df %>% dplyr::group_by(inseeCommune) %>% summarise(prix_median = median(prix_m2,na.rm = T), number_offers = n()) %>% filter(is.finite(prix_median))
+```
+

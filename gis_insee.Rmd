@@ -1,0 +1,40 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(rgdal)
+library(leaflet)
+
+# From https://www.census.gov/geo/maps-data/data/cbf/cbf_state.html
+states <- readOGR("data/geo/ADMIN-EXPRESS_2-0__SHP__FRA_2019-03-14/ADMIN-EXPRESS/1_DONNEES_LIVRAISON_2019-03-14/ADE_2-0_SHP_LAMB93_FR/COMMUNE.shp",
+  layer = "COMMUNE", GDAL1_integer64_policy = TRUE)
+```
+```{r}
+bretagne <- subset(states, states$INSEE_REG=="53")
+
+bretagne <-  merge(bretagne, groupy, by.x = "INSEE_COM", by.y = "inseeCommune")
+
+```
+
+```{r}
+summary(bretagne)
+germG <- spTransform(bretagne, CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0"))
+plot(germG, axes=T)
+```
+
+```{r}
+leaflet(germG)   %>% addProviderTiles(providers$CartoDB.Positron) %>%
+
+  addPolygons(color = "#444444", weight = 1, smoothFactor = 0.5,
+    opacity = 1.0, fillOpacity = 0.2,label = ~paste(NOM_COM,round(prix_median,0),":", number_offers),
+    fillColor = ~colorQuantile("YlOrRd", prix_median)(prix_median),
+    highlightOptions = highlightOptions(color = "white", weight = 2,
+      bringToFront = TRUE))
+```
+

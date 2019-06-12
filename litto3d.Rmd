@@ -1,0 +1,138 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(plotly)
+library(raster)
+library(purrr)
+
+```
+## read one folder for all .xyz file and convert to single Raster file
+```{r}
+FOLDER <- 'data/geo/0135_6825/'
+all.xyz  <-rev(list.files(FOLDER, pattern = ".*FRA_.*\\.xyz", recursive = TRUE))
+all.xyz <- paste0(FOLDER,all.xyz)
+
+df.xyz <- all.xyz %>% map_dfr(read.csv,header=F,sep="")
+```
+
+## rasterize xyz file
+```{r}
+rastaman <- function(df){
+
+pts <- df %>% dplyr::select(V1,V2,V3) 
+colnames(pts)<- c('x','y','z')
+pts <- pts %>% dplyr::filter(z>-500)
+
+# create a SpatialPointsDataFrame
+coordinates(pts) = ~x+y 					
+crs(pts)<- "+init=epsg:2154"
+
+print(extent(pts))
+# create an empty raster object to the extent of the points
+rast <- raster(ext=extent(pts),resolution=10)
+
+# rasterize your irregular points 
+rasOut<-rasterize(pts, rast, pts$z, fun = mean) # we use a mean function here to regularly grid the irregular input points
+
+return (rasOut)
+}
+
+rasta <- rastaman(df.xyz)
+
+rasta.approx <- approxNA(rasta)
+plot(rasta)
+df.from.rasta <- as.data.frame(rasta,xy=TRUE) %>% distinct()
+
+
+
+
+
+```
+
+```{r}
+spreado <- df.from.rasta%>% spread(x,layer)
+
+mat <- spreado %>% dplyr::select(-y) %>% as.matrix(.)
+mat[mat < -100] <- 0
+
+axz <- list(
+  nticks = 4,
+  range = c(-1,500)
+)
+
+
+p <- plot_ly(z = ~mat) %>% add_surface()  %>%  layout(scene = list(zaxis=axz))
+p
+
+```
+
+
+```{r}
+all.xyz  <-rev(list.files(pattern = ".*FRA_.*\\.xyz", recursive = TRUE))
+df.all.xyz <-as.data.frame(all.xyz)
+
+rastaman <- function(file){
+  pts <- read.csv(file,header = F,sep="")
+pts <- pts %>% dplyr::select(V1,V2,V3) 
+colnames(pts)<- c('x','y','z')
+pts <- pts %>% dplyr::filter(z>-500)
+
+# create a SpatialPointsDataFrame
+coordinates(pts) = ~x+y 					
+crs(pts)<- "+init=epsg:2154"
+
+print(extent(pts))
+# create an empty raster object to the extent of the points
+rast <- raster(ext=extent(pts),resolution=10)
+
+# rasterize your irregular points 
+rasOut<-rasterize(pts, rast, pts$z, fun = mean) # we use a mean function here to regularly grid the irregular input points
+
+return (rasOut)
+}
+
+rasta.1 <- rastaman(all.xyz[1])
+rasta.2<- rastaman(all.xyz[2])
+rasta.3<- rastaman(all.xyz[200])
+rasta.4<- rastaman(all.xyz[201])
+rasta.5<- rastaman(all.xyz[401])
+
+plot(rasta.1)
+plot(rasta.2)
+plot(rasta.3)
+plot(rasta.4)
+plot(rasta.5)
+res(rasta.5)<- c(35.00015,94.99975)
+ res(rasta.4)<- c(35.00015,94.99975)
+ 
+print(res(rasta.1))
+print(res(rasta.2))
+print(res(rasta.3))
+print(res(rasta.4))
+print(res(rasta.5))
+
+em = merge(extent(rasta.1),extent(rasta.2),extent(rasta.3),extent(rasta.5),extent(rasta.4))
+
+extent(rasta.1)<- em
+extent(rasta.2)<- em
+extent(rasta.3)<- em
+res(rasta.4)<- res(rasta.1)
+res(rasta.5)<- res(rasta.1)
+
+rasta.all <- raster::mosaic(rasta.3,rasta.1,rasta.4,rasta.5,tolerance=10,fun=mean)
+plot(rasta.all)
+#writeRaster(rasOut, fout, format="GTiff",overwrite=T)
+
+```
+
+
+
+
+
