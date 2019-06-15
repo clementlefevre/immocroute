@@ -1,0 +1,55 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+library(plotly)
+
+library(ggplot2)
+source('geo_helpers.R')
+```
+
+convert coordinates from google map WGS 84
+```{r}
+camaret <- list(lon = -4.601688,lat=48.275142)
+le.fret <- list(lon=-4.509050,lat= 48.286016)
+ilot.des.capucins <- list(lat=48.319210, lon=-4.582411)
+reduit.de.quelern <- list(lat=48.297536, lon= -4.561216)
+morgat <- list(lat=48.2273956,lon=-4.505216)
+
+center <- reduit.de.quelern
+
+d <- data.frame(lon=center['lon'], lat=center['lat'])
+coordinates(d) <- c("lon", "lat")
+proj4string(d) <- CRS("+init=epsg:4326") # WGS 84
+CRS.new <- CRS("+init=epsg:2154")
+# (@mdsumner points out that
+#    CRS.new <- CRS("+init=epsg:2056")
+# will work, and indeed it does. See http://spatialreference.org/ref/epsg/2056/proj4/.)
+d.lambert93 <- spTransform(d, CRS.new)
+d.lambert93@coords[1]
+```
+
+
+## Load data MNT5 Files
+```{r}
+
+data <- NULL
+data$metadata <- select.area(5,d.lambert93@coords[1]-500,d.lambert93@coords[2],3 )
+data$all.lon <- sort(unique(data$metadata$x))
+data$df.all <- merge.all.lon.stacks(data)
+data$raster <- rasterize.df(data,3)
+p <- plot.3d(data)
+p
+
+
+```
+
+
+
+
